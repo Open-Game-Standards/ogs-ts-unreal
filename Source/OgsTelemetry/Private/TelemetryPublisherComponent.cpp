@@ -166,7 +166,9 @@ void UTelemetryPublisherComponent::ApplyGravity(const Vec3& StandardGravity)
         Next.GravityVector.Y == Env.GravityVector.Y &&
         Next.GravityVector.Z == Env.GravityVector.Z) return;
     Env = Next;
-    LastDiscovery = -1e18; // re-send on change (C-12)
+    // re-send on change (C-12): every page repeats the environment
+    bPagesDirty = true;
+    bSendAllPages = true;
 }
 
 void UTelemetryPublisherComponent::SetGravity(FVector Gravity)
@@ -327,23 +329,55 @@ void UTelemetryPublisherComponent::Send(FrameType Type,
                    (int32)Datagram.size(), Sent, *Endpoint);
 }
 
-void UTelemetryPublisherComponent::SendDiscovery()
+void UTelemetryPublisherComponent::RebuildDiscoveryPages()
 {
-    WireBuilder B;
     ObjectDecl Obj;
     Obj.Name = TCHAR_TO_UTF8(*ObjectName);
     Obj.Location = "local";
     Obj.TypeLabel = TCHAR_TO_UTF8(*TypeLabel);
     Obj.Type = 1; // vehicle (ObjectType ordinal: 0 other, 1 vehicle, ...)
     Obj.Primary = true;
-    Obj.Channels.clear();
     Obj.Channels.reserve((size_t)Declarations.Num());
     for (const auto& D : Declarations) Obj.Channels.push_back(D);
-    BuildDiscovery(B, 1, SessionStartUnixUs,
+    DiscoveryPages = PaginateDiscovery(1, SessionStartUnixUs,
         TCHAR_TO_UTF8(*(GameName.IsEmpty()
             ? FApp::GetProjectName() : GameName)),
-        Env, { Obj });
-    Send(FrameType::Discovery, B.Wrap(FrameType::Discovery));
+        Env, { Obj }, Generation);
+    SentTypeLabel = TypeLabel;
+    bPagesDirty = false;
+}
+
+// Pacing (implementation-udp.md § Send cadence): every page back-to-back at
+// the first tick and after a change; otherwise each re-send cycle spreads
+// the pages evenly across DiscoveryIntervalSeconds.
+void UTelemetryPublisherComponent::SendDiscovery()
+{
+    // the object's identity changed: a new generation, every page re-sent
+    if (!DiscoveryPages.empty() && TypeLabel != SentTypeLabel)
+    {
+        Generation++;
+        bPagesDirty = true;
+        bSendAllPages = true;
+    }
+    if (bPagesDirty) RebuildDiscoveryPages();
+
+    if (bSendAllPages)
+    {
+        for (const auto& Page : DiscoveryPages) Send(FrameType::Discovery, Page);
+        bSendAllPages = false;
+        LastDiscovery = Clock;
+        NextPage = DiscoveryPages.size();
+        return;
+    }
+    if (Clock - LastDiscovery >= DiscoveryIntervalSeconds)
+    {
+        LastDiscovery = Clock;
+        NextPage = 0;
+    }
+    const double Spacing = DiscoveryIntervalSeconds / (double)DiscoveryPages.size();
+    while (NextPage < DiscoveryPages.size() &&
+           Clock - LastDiscovery >= (double)NextPage * Spacing)
+        Send(FrameType::Discovery, DiscoveryPages[NextPage++]);
 }
 
 void UTelemetryPublisherComponent::SendMotion()
@@ -386,8 +420,29 @@ void UTelemetryPublisherComponent::SendMotion()
         else C.Number = v;
         O.Channels.push_back(C);
     }
-    BuildMotion(B, Clock, { O });
-    Send(FrameType::Motion, B.Wrap(FrameType::Motion));
+    if (MotionPlan.empty())
+        MotionPlan = PlanMotionParts(O.Channels.size(), O.Name);
+    if (MotionPlan.size() == 1)
+    {
+        BuildMotion(B, Clock, { O }, Generation);
+        Send(FrameType::Motion, B.Wrap(FrameType::Motion));
+        return;
+    }
+    // parts back-to-back: the pose and the first values in part 0, the rest
+    // as channels-only parts (implementation-udp.md § Motion parts)
+    std::vector<ChannelValueInput> All = std::move(O.Channels);
+    const uint16_t Count = (uint16_t)MotionPlan.size();
+    for (uint16_t p = 0; p < Count; p++)
+    {
+        const auto& Range = MotionPlan[p];
+        MotionObjectInput Part = p == 0 ? O : MotionObjectInput{};
+        Part.Name = O.Name;
+        Part.ChannelsOnly = p > 0;
+        Part.Channels.assign(All.begin() + (std::ptrdiff_t)Range.first,
+                             All.begin() + (std::ptrdiff_t)(Range.first + Range.second));
+        BuildMotion(B, Clock, { Part }, Generation, p, Count);
+        Send(FrameType::Motion, B.Wrap(FrameType::Motion));
+    }
 }
 
 void UTelemetryPublisherComponent::SendEvents()
@@ -429,11 +484,7 @@ void UTelemetryPublisherComponent::TickComponent(
         }
     }
 
-    if (Clock - LastDiscovery >= DiscoveryIntervalSeconds)
-    {
-        SendDiscovery();
-        LastDiscovery = Clock;
-    }
+    SendDiscovery();
     if (Clock - LastMotion >= 1.0 / FMath::Max(MotionHz, 1.0))
     {
         SendMotion();

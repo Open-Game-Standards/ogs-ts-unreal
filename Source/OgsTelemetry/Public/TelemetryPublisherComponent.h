@@ -168,6 +168,16 @@ private:
     FSocket* Socket = nullptr;
     TSharedPtr<FInternetAddr> Endpoint;
     double LastDiscovery = -1e18, LastMotion = -1e18, LastEventSend = -1e18;
+
+    // Datagram budget (implementation-udp.md): discovery cached as its pages,
+    // all sent at the first tick and after any change, then spread across
+    // each re-send interval; motion split into parts by a cached plan.
+    uint32 Generation = 0;
+    FString SentTypeLabel;              // TypeLabel the cached pages declare
+    std::vector<std::vector<uint8_t>> DiscoveryPages;
+    bool bPagesDirty = true, bSendAllPages = true;
+    size_t NextPage = 0;
+    std::vector<std::pair<size_t, size_t>> MotionPlan;
     double Clock = 0;
     double ClockOrigin = -1;    // FPlatformTime at the first tick
     int64 SessionStartUnixUs = 0;
@@ -188,6 +198,7 @@ private:
     void Send(ogs::telemetry::FrameType Type,
              const std::vector<uint8_t>& Datagram);
     void SendDiscovery();
+    void RebuildDiscoveryPages();
     void SendMotion();
     void SendEvents();
     void GetCurrentValue(int32 Index, double& OutValue, bool& OutBool) const;

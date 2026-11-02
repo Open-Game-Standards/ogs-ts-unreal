@@ -15,6 +15,15 @@ Community & support: [Discord](https://discord.gg/tseF4Q6U99) · Development is 
 Status: **validated** — end-to-end in UE 5.8 (channels=3, r=10 m circle, quaternion norm holds); UE module compiled and the unit-conversion table verified on the wire against the C# core (`OgsConversionTestActor`, all five probe channels). Dependency-free C++ serializer (no Cap'n Proto
 library) byte-identical against the standard's conformance corpus.
 
+Every datagram stays within the standard's 1,400-byte budget
+([implementation-udp.md § Datagram budget](https://github.com/Open-Game-Standards/OGS-Telemetry-Standard/blob/main/implementation-udp.md#datagram-budget)),
+however many channels you declare: `TelemetryPublisherComponent` pages a
+large discovery with `PaginateDiscovery` (every page at start and after a
+change, then spread across each 2-second re-send) and sends a tick with
+many channel values as back-to-back parts planned by `PlanMotionParts`,
+the pose always in the first (`OgsTelemetryWire.h`). Changing
+`TypeLabel` at runtime starts a new discovery generation.
+
 **Built with AI assistance.** Significant portions of this plugin
 (including the wire serializer, the frame-conversion math,
 and the unit-conversion table) were written with AI coding assistance
