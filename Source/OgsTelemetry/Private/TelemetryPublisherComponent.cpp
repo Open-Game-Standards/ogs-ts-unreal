@@ -4,6 +4,7 @@
 #include "SocketSubsystem.h"
 #include "Misc/App.h"
 #include "HAL/PlatformTime.h"
+#include "HAL/PlatformProcess.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/SceneComponent.h"
@@ -80,6 +81,7 @@ FOgsChannelHandle UTelemetryPublisherComponent::DeclareChannel(
     D.Name = TCHAR_TO_UTF8(*Name);
     D.Unit = TCHAR_TO_UTF8(*Unit);
     D.Min = Min; D.Max = Max; D.HasRange = HasRange;
+    D.Type = ogs::telemetry::schema::ChannelType::Number;
     Declarations.Add(D);
     Bindings.Add({});
     FOgsChannelHandle H; H.Id = Declarations.Num() - 1;
@@ -91,7 +93,10 @@ FOgsChannelHandle UTelemetryPublisherComponent::DeclareBooleanChannel(
 {
     FOgsChannelHandle H = DeclareChannel(Name, TEXT(""), 0, 0, false);
     if (H.Id >= 0)
+    {
         Bindings[H.Id].bBool = true;
+        Declarations[H.Id].Type = ogs::telemetry::schema::ChannelType::Boolean;
+    }
     return H;
 }
 
@@ -342,7 +347,8 @@ void UTelemetryPublisherComponent::RebuildDiscoveryPages()
     DiscoveryPages = PaginateDiscovery(1, SessionStartUnixUs,
         TCHAR_TO_UTF8(*(GameName.IsEmpty()
             ? FApp::GetProjectName() : GameName)),
-        Env, { Obj }, Generation);
+        Env, { Obj }, Generation, kDatagramBudget,
+        Instance{ TCHAR_TO_UTF8(*InstanceLabel), TCHAR_TO_UTF8(FPlatformProcess::ComputerName()) });
     SentTypeLabel = TypeLabel;
     bPagesDirty = false;
 }

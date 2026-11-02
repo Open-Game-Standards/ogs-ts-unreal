@@ -55,6 +55,10 @@ public:
     FString ObjectName = TEXT("player");
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OGS|Identity")
     FString TypeLabel;
+    /** Names this instance in receivers' session pickers when more than one
+     *  can run on a network ("Rig 2"); the host name is filled in automatically. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OGS|Identity")
+    FString InstanceLabel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OGS|Cadence")
     double MotionHz = 60.0;
