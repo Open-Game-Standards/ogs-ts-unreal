@@ -348,7 +348,8 @@ void UTelemetryPublisherComponent::RebuildDiscoveryPages()
         TCHAR_TO_UTF8(*(GameName.IsEmpty()
             ? FApp::GetProjectName() : GameName)),
         Env, { Obj }, Generation, kDatagramBudget,
-        Instance{ TCHAR_TO_UTF8(*InstanceLabel), TCHAR_TO_UTF8(FPlatformProcess::ComputerName()) });
+        Instance{ TCHAR_TO_UTF8(*InstanceLabel), TCHAR_TO_UTF8(FPlatformProcess::ComputerName()),
+                  (float)MotionHz });
     SentTypeLabel = TypeLabel;
     bPagesDirty = false;
 }
