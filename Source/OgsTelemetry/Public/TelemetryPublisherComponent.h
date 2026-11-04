@@ -42,10 +42,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OGS|Transport")
     int32 TTL = 1;
     /// Egress NIC for multicast, as that interface's local IPv4 address
-    /// (e.g. "192.168.1.5"). Empty lets the OS default route pick the
-    /// interface — on a multi-homed host (dedicated servers, VMs, a dev
-    /// machine with a VPN adapter) that can silently pick a NIC with no
-    /// path to the LAN.
+    /// (e.g. "192.168.1.5"). Empty uses the default route's interface — on
+    /// a multi-homed host (dedicated servers, VMs, a dev machine with a VPN
+    /// adapter) that may have no path to the LAN. Not 127.0.0.1 on the
+    /// standard group: the stream would stop leaving this machine
+    /// (implementation-udp.md § Network interfaces).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OGS|Transport")
     FString LocalInterfaceAddress;
 

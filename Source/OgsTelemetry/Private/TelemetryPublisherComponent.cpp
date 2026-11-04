@@ -11,6 +11,29 @@
 
 using namespace ogs::telemetry;
 
+/** This host's IPv4 address on its default route, or null when it has none.
+ *  Connecting a UDP socket only looks up the route; nothing is sent.
+ *  192.0.2.1 is reserved for documentation (RFC 5737). */
+static TSharedPtr<FInternetAddr> DefaultRouteAddress(ISocketSubsystem* SS)
+{
+    FSocket* Probe = SS->CreateSocket(NAME_DGram, TEXT("OgsTelemetryRouteProbe"), false);
+    if (!Probe) return nullptr;
+    TSharedPtr<FInternetAddr> Local;
+    TSharedRef<FInternetAddr> Remote = SS->CreateInternetAddr();
+    bool bValid = false;
+    Remote->SetIp(TEXT("192.0.2.1"), bValid);
+    Remote->SetPort(9);
+    if (bValid && Probe->Connect(*Remote))
+    {
+        Local = SS->CreateInternetAddr();
+        Probe->GetAddress(*Local);
+    }
+    SS->DestroySocket(Probe);
+    if (!Local.IsValid()) return nullptr;
+    const FString Ip = Local->ToString(false);
+    return Ip == TEXT("0.0.0.0") || Ip.StartsWith(TEXT("127.")) ? nullptr : Local;
+}
+
 UTelemetryPublisherComponent::UTelemetryPublisherComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
@@ -41,6 +64,21 @@ void UTelemetryPublisherComponent::BeginPlay()
                 bool bIfValid = false;
                 IfAddr->SetIp(*LocalInterfaceAddress, bIfValid);
                 if (bIfValid) Socket->SetMulticastInterface(*IfAddr);
+            }
+            else
+            {
+                // Named rather than left to the OS, whose choice for a group
+                // moves to loopback once anything on this host has sent to
+                // that group over loopback; the stream then stops leaving the
+                // machine (implementation-udp.md § Network interfaces).
+                const int32 FirstOctet = FCString::Atoi(*MulticastGroup);
+                if (FirstOctet >= 224 && FirstOctet <= 239)
+                {
+                    if (TSharedPtr<FInternetAddr> IfAddr = DefaultRouteAddress(SS))
+                    {
+                        Socket->SetMulticastInterface(*IfAddr);
+                    }
+                }
             }
             TSharedRef<FInternetAddr> Addr = SS->CreateInternetAddr();
             Addr->SetPort((uint32)Port);
