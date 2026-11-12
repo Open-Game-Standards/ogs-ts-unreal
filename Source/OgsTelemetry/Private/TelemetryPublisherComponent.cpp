@@ -343,7 +343,7 @@ void UTelemetryPublisherComponent::FireEvent(const FString& Name,
                               (float)Direction.Z });
     E.Direction = d;
     E.HasDirection = !Direction.IsNearlyZero();
-    RecentEvents.Add({ E, Clock });
+    PendingEvents.Add(E);
 }
 
 void UTelemetryPublisherComponent::GetCurrentValue(int32 Index,
@@ -495,8 +495,11 @@ void UTelemetryPublisherComponent::SendEvents()
     if (RecentEvents.IsEmpty()) return; // check before building the vector
     WireBuilder B;
     std::vector<EventInput> Evs;
-    for (const auto& Pair : RecentEvents)
-        Evs.push_back(Pair.Key);
+    for (auto& Q : RecentEvents)
+    {
+        Evs.push_back(Q.Ev);
+        Q.bSent = true;
+    }
     BuildEventFrame(B, Clock, Evs);
     Send(FrameType::Event, B.Wrap(FrameType::Event));
 }
@@ -530,12 +533,22 @@ void UTelemetryPublisherComponent::TickComponent(
     }
 
     SendDiscovery();
-    if (Clock - LastMotion >= 1.0 / FMath::Max(MotionHz, 1.0))
+    // schedule by accumulation: advancing from the previous due time (not the
+    // late send time) keeps the long-run rate at MotionHz whatever the frame
+    // rate; a stall of more than one interval resyncs to now
+    const double Interval = 1.0 / FMath::Max(MotionHz, 1.0);
+    const double Due = LastMotion + Interval;
+    if (Clock >= Due - 1e-6)
     {
         SendMotion();
-        LastMotion = Clock;
+        LastMotion = (LastMotion < -1e17 || Clock - Due > Interval) ? Clock : Due;
     }
-    while (!RecentEvents.IsEmpty() && Clock - RecentEvents[0].Value > 0.100)
+    for (const auto& Ev : PendingEvents)
+        RecentEvents.Add({ Ev, Clock, false });
+    PendingEvents.Reset();
+    // an event leaves once its window has passed AND it has been sent
+    while (!RecentEvents.IsEmpty() && RecentEvents[0].bSent &&
+           Clock - RecentEvents[0].At > 0.100)
         RecentEvents.RemoveAt(0);
     if (!RecentEvents.IsEmpty() && Clock - LastEventSend >= 0.050)
     {

@@ -167,7 +167,17 @@ private:
     };
     TArray<ogs::telemetry::ChannelDecl> Declarations;
     TArray<FBinding> Bindings;
-    TArray<TPair<ogs::telemetry::EventInput, double>> RecentEvents;
+    // Events enter PendingEvents unstamped and are stamped with the clock of
+    // the next tick, so the ~100 ms replay window is measured from a tick (a
+    // slow frame cannot age an event out before it was ever sent).
+    struct FQueuedEvent
+    {
+        ogs::telemetry::EventInput Ev;
+        double At = 0;
+        bool bSent = false;
+    };
+    TArray<ogs::telemetry::EventInput> PendingEvents;
+    TArray<FQueuedEvent> RecentEvents;
     uint32 NextEventId = 1;
 
     FSocket* Socket = nullptr;
