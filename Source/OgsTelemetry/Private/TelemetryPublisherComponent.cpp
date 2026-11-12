@@ -500,8 +500,14 @@ void UTelemetryPublisherComponent::SendEvents()
         Evs.push_back(Q.Ev);
         Q.bSent = true;
     }
-    BuildEventFrame(B, Clock, Evs);
-    Send(FrameType::Event, B.Wrap(FrameType::Event));
+    // a burst larger than one datagram goes out as several frames
+    for (const auto& Run : PlanEventFrames(Evs, Clock))
+    {
+        BuildEventFrame(B, Clock,
+            std::vector<EventInput>(Evs.begin() + (std::ptrdiff_t)Run.first,
+                                    Evs.begin() + (std::ptrdiff_t)(Run.first + Run.second)));
+        Send(FrameType::Event, B.Wrap(FrameType::Event));
+    }
 }
 
 void UTelemetryPublisherComponent::TickComponent(

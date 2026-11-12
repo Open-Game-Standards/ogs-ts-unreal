@@ -558,6 +558,50 @@ int main(int argc, char** argv)
                   std::abs(d.SpecificForce.Y - 3.71f) < 1e-4f &&
                   std::abs(d.SpecificForce.X) < 1e-4f);
         }
+        { // the sample after a reset seeds velocity instead of differencing against zero
+            for (int hasVel = 0; hasVel < 2; hasVel++)
+            {
+                BodyDynamicsDeriver d;
+                const Vec3 v{ 0, 0, 300 }; // spacecraft at cruise
+                Vec3 p{ 0, 0, 0 };
+                d.Sample(dt, p, { 0, 0, 0, 1 }, hasVel != 0, v);
+                bool ok = true;
+                for (int i = 0; i < 5; i++)
+                {
+                    p.Z += v.Z * (float)dt;
+                    d.Sample(dt, p, { 0, 0, 0, 1 }, hasVel != 0, v);
+                    ok = ok && std::abs(d.SpecificForce.Z) < 0.5f &&
+                         std::abs(d.SpecificForce.Y - g) < 0.5f;
+                }
+                Check(hasVel ? "deriver: moving spawn has no false surge (measured velocity)"
+                             : "deriver: moving spawn has no false surge (derived velocity)", ok);
+            }
+        }
+    }
+
+    { // event bursts split to the datagram budget (implementation-udp.md § Event splitting)
+        std::vector<EventInput> burst;
+        for (uint32_t i = 1; i <= 60; i++)
+        {
+            EventInput e; e.Id = i; e.Name = "body.impact"; e.Intensity = 0.9f;
+            e.HasDirection = true; e.Direction = { 0, 0, -1 };
+            burst.push_back(e);
+        }
+        const auto plan = PlanEventFrames(burst, 1.0);
+        bool ok = plan.size() > 1, contiguous = true;
+        size_t next = 0;
+        for (const auto& [start, count] : plan)
+        {
+            WireBuilder b;
+            BuildEventFrame(b, 1.0, std::vector<EventInput>(burst.begin() + (std::ptrdiff_t)start,
+                                                             burst.begin() + (std::ptrdiff_t)(start + count)));
+            ok = ok && b.Wrap(FrameType::Event).size() <= kDatagramBudget;
+            contiguous = contiguous && start == next;
+            next += count;
+        }
+        Check("events: a 60-event burst splits into frames within the budget", ok);
+        Check("events: the split covers every event once, in order", contiguous && next == burst.size());
+        Check("events: a small burst stays one frame", PlanEventFrames({ burst[0], burst[1] }, 1.0).size() == 1);
     }
 
     std::printf("conformance: %d passed, %d failed\n", g_pass, g_fail);
