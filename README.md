@@ -22,7 +22,12 @@ large discovery with `PaginateDiscovery` (every page at start and after a
 change, then spread across each 2-second re-send) and sends a tick with
 many channel values as back-to-back parts planned by `PlanMotionParts`,
 the pose always in the first (`OgsTelemetryWire.h`). Changing
-`TypeLabel` at runtime starts a new discovery generation.
+`TypeLabel` at runtime starts a new discovery generation. Event
+bursts too large for one datagram are split across frames by
+`PlanEventFrames`; every event is sent at least once and replayed for about
+100 ms, events are ignored and dropped while paused, and `ClearEvents`
+discards queued ones. `ObjectType` and `ReferencePoint` (Identity category)
+set what discovery declares for the primary object.
 
 **Built with AI assistance.** Significant portions of this plugin
 (including the wire serializer, the frame-conversion math,

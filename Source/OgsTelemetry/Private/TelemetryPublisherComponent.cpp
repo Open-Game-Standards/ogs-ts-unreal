@@ -176,6 +176,12 @@ void UTelemetryPublisherComponent::SetPaused(bool bPaused)
     bManualPaused = bPaused;
 }
 
+void UTelemetryPublisherComponent::ClearEvents()
+{
+    PendingEvents.Reset();
+    RecentEvents.Reset();
+}
+
 void UTelemetryPublisherComponent::SetBodyDynamics(FVector SpecificForce,
                                                    FVector AngularVelocity)
 {
@@ -333,6 +339,8 @@ void UTelemetryPublisherComponent::BindChannelRaw(
 void UTelemetryPublisherComponent::FireEvent(const FString& Name,
     float Intensity, float Duration, FVector Direction)
 {
+    // no stimuli while the simulation is stopped: actuators are settling (C-11)
+    if (bPausedNow) return;
     EventInput E;
     E.Id = NextEventId++;
     E.Name = TCHAR_TO_UTF8(*Name);
@@ -368,8 +376,9 @@ void UTelemetryPublisherComponent::Send(FrameType Type,
 {
     if (!Socket || !Endpoint.IsValid()) return;
     int32 Sent = 0;
-    Socket->SendTo((const uint8_t*)Datagram.data(),
-                   (int32)Datagram.size(), Sent, *Endpoint);
+    if (!Socket->SendTo((const uint8_t*)Datagram.data(),
+                        (int32)Datagram.size(), Sent, *Endpoint))
+        ++SendFailures;
 }
 
 void UTelemetryPublisherComponent::RebuildDiscoveryPages()
@@ -378,7 +387,8 @@ void UTelemetryPublisherComponent::RebuildDiscoveryPages()
     Obj.Name = TCHAR_TO_UTF8(*ObjectName);
     Obj.Location = "local";
     Obj.TypeLabel = TCHAR_TO_UTF8(*TypeLabel);
-    Obj.Type = 1; // vehicle (ObjectType ordinal: 0 other, 1 vehicle, ...)
+    Obj.Type = (uint16_t)ObjectType; // wire ordinals match EOgsObjectType
+    if (!ReferencePoint.IsEmpty()) Obj.RefPointName = TCHAR_TO_UTF8(*ReferencePoint);
     Obj.Primary = true;
     Obj.Channels.reserve((size_t)Declarations.Num());
     for (const auto& D : Declarations) Obj.Channels.push_back(D);
@@ -525,6 +535,9 @@ void UTelemetryPublisherComponent::TickComponent(
     bPausedNow = bManualPaused || (bAutoDetectPause && World && World->IsPaused());
     if (Bindings.IsValidIndex(PauseChannel.Id))
         Bindings[PauseChannel.Id].bBoolValue = bPausedNow;
+    // stimuli queued before a pause do not outlive the moment the sim stops
+    if (bPausedNow && !bEventsPaused) ClearEvents();
+    bEventsPaused = bPausedNow;
 
     // C-12: the world's gravity (cm/s² along UE Z; negative = down)
     if (bGravityFromWorld && World)

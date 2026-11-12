@@ -27,6 +27,22 @@ struct FOgsChannelHandle
     UPROPERTY(BlueprintReadOnly) int32 Id = -1;
 };
 
+/** What the primary object is (schema ObjectType). Receivers pick a cueing
+ *  profile by it: a spacecraft is not a ground vehicle. Ordinals match the
+ *  wire enum. */
+UENUM(BlueprintType)
+enum class EOgsObjectType : uint8
+{
+    Other = 0,
+    Vehicle = 1,
+    Aircraft = 2,
+    Watercraft = 3,
+    Spacecraft = 4,
+    Humanoid = 5,
+    Camera = 6,
+    Creature = 7,
+};
+
 UCLASS(ClassGroup = (OGS), meta = (BlueprintSpawnableComponent))
 class UTelemetryPublisherComponent : public UActorComponent
 {
@@ -56,6 +72,11 @@ public:
     FString ObjectName = TEXT("player");
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OGS|Identity")
     FString TypeLabel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OGS|Identity")
+    EOgsObjectType ObjectType = EOgsObjectType::Vehicle;
+    /** Name of the point the pose describes (default "origin"). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OGS|Identity")
+    FString ReferencePoint = TEXT("origin");
     /** Names this instance in receivers' session pickers when more than one
      *  can run on a network ("Rig 2"); the host name is filled in automatically. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OGS|Identity")
@@ -111,6 +132,17 @@ public:
     /// Whether the component is currently reporting a pause.
     UFUNCTION(BlueprintPure, Category = "OGS")
     bool IsReportingPause() const { return bPausedNow; }
+
+    /// Drops every queued and not-yet-sent event - for a host that goes
+    /// inactive (respawn, level change) and must not have stale stimuli
+    /// reach the receiver afterwards. Pausing does this by itself.
+    UFUNCTION(BlueprintCallable, Category = "OGS")
+    void ClearEvents();
+
+    /// Datagrams the socket refused (interface down, no route). Telemetry is
+    /// lossy by design, so a failed send is counted, not fatal.
+    UFUNCTION(BlueprintPure, Category = "OGS")
+    int64 GetSendFailures() const { return SendFailures; }
 
     // ---- declarations (BeginPlay; locked at first tick) ----
     UFUNCTION(BlueprintCallable, Category = "OGS")
@@ -199,6 +231,8 @@ private:
     bool bLocked = false;
     FOgsChannelHandle PauseChannel;
     bool bManualPaused = false, bPausedNow = false;
+    bool bEventsPaused = false;   // pause state the event queue last saw
+    int64 SendFailures = 0;
 
     ogs::telemetry::Vec3 BodySpecificForce, BodyAngularVelocity;
     bool bHasBodyDynamics = false;
